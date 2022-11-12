@@ -1,11 +1,12 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch import einsum
 from torch.nn.parameter import Parameter
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat
 import numpy as np
-from pytorch_pretrained_vit import ViT
+
 
 def init_to_zeros(m):
     '''
@@ -18,37 +19,23 @@ def init_to_zeros(m):
         m.weight.data.fill_(0)
         m.bias.data.fill_(0)
 
-def initialize_model(model, pretrained, model_type=3, n=12):
+def initialize_model(model, pretrained, n=12):
     '''
     Initializes all layers in ViT to weights from pretrained ViT
 
     args:
         model - model to initialize
         pretrained - pretrained model
-        model_type - Model implementation (this is ViViT stuff, will likely be removed)
-        n - number of transformer layers
+        n - number of transformer layers to be initialized
     '''
     pretrained_transformer = pretrained.transformer.blocks
+    for i, child in pretrained_transformer.named_children():
+        i = int(i)
+        if i > n: break
 
-    assert model_type in [1, 3], 'Model_type must be either 1 (Spatio-temporal) or 3 (Factorized self-attention)'
-
-    if model_type == 3:
-        for i, child in pretrained_transformer.named_children():
-            i = int(i)
-            if i > n: break
-
-            model.transformer.layers[i].spatial_attn.load_state_dict(child.state_dict(), strict=False)
-            model.transformer.layers[i].mlp.load_state_dict(child.pwff.state_dict(), strict=False)
-            model.transformer.layers[i].mlp.load_state_dict(child.state_dict(), strict=False)
-            model.transformer.layers[i].temporal_attn.apply(init_to_zeros)
-    else:
-        for i, child in pretrained_transformer.named_children():
-            i = int(i)
-            if i > n: break
-
-            model.transformer.layers[i].attn.load_state_dict(child.state_dict(), strict=False)
-            model.transformer.layers[i].mlp.load_state_dict(child.pwff.state_dict(), strict=False)
-            model.transformer.layers[i].mlp.load_state_dict(child.state_dict(), strict=False)
+        model.transformer.layers[i].attn.load_state_dict(child.state_dict(), strict=False)
+        model.transformer.layers[i].mlp.load_state_dict(child.pwff.state_dict(), strict=False)
+        model.transformer.layers[i].mlp.load_state_dict(child.state_dict(), strict=False)
     return model
 
 class SPT(nn.Module):
@@ -169,8 +156,8 @@ class AttentionBlock(nn.Module):
         super().__init__()
 
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = FSAttention(dim, heads=n_heads, dropout=dropout)
-        # self.attn = LSA(dim, heads=n_heads, dropout=dropout)
+        # self.attn = FSAttention(dim, heads=n_heads, dropout=dropout)
+        self.attn = LSA(dim, heads=n_heads, dropout=dropout)
         self.proj = nn.Linear(dim, dim, bias=True)
 
     def forward(self, x):
@@ -180,7 +167,6 @@ class AttentionBlock(nn.Module):
         return x
 
 class FeedForward(nn.Module):
-    ''' I dont think we'll need this'''
     def __init__(self, dim, dropout=0):
         super().__init__()
 
@@ -232,8 +218,8 @@ class Model(nn.Module):
         
         super().__init__()
 
-        W, H = i_dim
-        w, h = p_dim
+        W, H = i_dim, i_dim # temp solution
+        w, h = p_dim, i_dim
         nw, nh = W // w, H // h
         self.dim = dim
 
