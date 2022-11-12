@@ -38,6 +38,7 @@ def initialize_model(model, pretrained, n=12):
         model.transformer.layers[i].mlp.load_state_dict(child.state_dict(), strict=False)
     return model
 
+# To do: Fix this
 class SPT(nn.Module):
     '''
     Few shot learning technique. Special way to tokenzie inputs. I don't understand it rn
@@ -59,6 +60,7 @@ class SPT(nn.Module):
         x_with_shifts = torch.cat((x, *shifted_x), dim = 1)
         return self.to_patch_tokens(x_with_shifts)
 
+# To do: Fix this
 class LSA(nn.Module):
     '''
     Another few shot learning technique from the same paper. Again, idk what's going on
@@ -156,8 +158,8 @@ class AttentionBlock(nn.Module):
         super().__init__()
 
         self.norm1 = nn.LayerNorm(dim)
-        # self.attn = FSAttention(dim, heads=n_heads, dropout=dropout)
-        self.attn = LSA(dim, heads=n_heads, dropout=dropout)
+        self.attn = FSAttention(dim, heads=n_heads, dropout=dropout)
+        # self.attn = LSA(dim, heads=n_heads, dropout=dropout)
         self.proj = nn.Linear(dim, dim, bias=True)
 
     def forward(self, x):
@@ -224,11 +226,11 @@ class Model(nn.Module):
         self.dim = dim
 
         proj_dim = 3 * w * h
-        # self.embedding = nn.Sequential(
-        #     Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=h, pw=w),
-        #     nn.Linear(proj_dim, dim)
-        # )
-        self.embedding = SPT(dim=dim, patch_size=w)
+        self.embedding = nn.Sequential(
+            Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=h, pw=w),
+            nn.Linear(proj_dim, dim)
+        )
+        # self.embedding = SPT(dim=dim, patch_size=w)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.pos_embedding = nn.Parameter(torch.randn(1, nh * nw, dim))
         self.mlp_head = nn.Sequential(nn.Dropout(dropout),
@@ -236,11 +238,6 @@ class Model(nn.Module):
                                     nn.BatchNorm1d(384),
                                     nn.ReLU(),
                                     nn.Linear(384, 1),
-                                    # nn.BatchNorm1d(192),
-                                    # nn.ReLU(),
-                                    # nn.Linear(192, 1),
-                                    # nn.ReLU(),
-                                    # nn.Linear(96, 1),
                                     nn.Sigmoid())
 
         self.transformer = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_transformer_layers, dropout=dropout)

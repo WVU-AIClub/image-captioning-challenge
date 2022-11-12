@@ -4,9 +4,20 @@ from pytorch_pretrained_vit import ViT
 from utils import plot_multiple_lists
 from datetime import datetime
 import logging
+import torch
 
-l1 = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-l2 = [2, 4, 6, 8, 2, 4, 6, 8, 2]
-l3 = [9, 8, 7, 6, 5, 4, 3, 2, 1]
+pretrained_vit = ViT('B_32', pretrained=True)
+model = Model(i_dim=224,
+                p_dim=16,
+                dim=768,
+                n_heads=4,
+                n_transformer_layers=12,
+                dropout=0,
+                device='cuda')
+model = initialize_model(model, pretrained_vit, n=12)
 
-plot_multiple_lists('graphs', 'Test', 'x axis', 'y axis', [l1, l2, l3], ['l1', 'l2', 'l3'])
+noise = torch.rand([32, 3, 224, 224])
+
+out = model(noise)
+
+print(out)
