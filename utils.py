@@ -4,6 +4,13 @@ from datetime import datetime
 import sys
 import matplotlib.pyplot as plt
 
+def load_access_token():
+    with open('secrets.txt', 'r') as f:
+        token = f.read()
+
+    return token
+
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 

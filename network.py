@@ -208,6 +208,58 @@ class TransformerEncoder(nn.Module):
 
         return z
 
+class TransformerDecoder(nn.Module):
+    def __init__(self, dim=512, n_heads=4, n_layers=4, dropout=0):
+        self.attn1 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
+        self.attn2 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
+        self.dropout = nn.Dropout(p=dropout)
+        self.norm = nn.LayerNorm(dim)
+        self.ff = nn.Sequential([
+            nn.Linear(dim, dim*4),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Linear(dim*4, dim)
+        ])
+
+        self.layers = nn.ModuleList([])
+        for i in range(n_layers):
+            temp = nn.ModuleList([])
+            temp.add_module('masked_attn', self.attn1)
+            temp.add_module('norm', self.norm)
+            temp.add_module('attn', self.attn2)
+            temp.add_module('ff', self.ff)
+            self.layers.append(temp)
+
+    def forward(self, in_seq, out_seq, padding_mask, shifted_output_mask):
+        '''
+        Args:
+            in_seq: Input sequence of size [batch_size, in_seq_len, dim]
+            out_seq: Output sequence of size [batch_sze, out_seq_len, dim]
+            padding_mask: Padding mask of size [batch_szie, in_seq_len, in_seq_len]
+                None if no mask is used
+            shifted_output_mask: Shifted output mask of size [batch_size, out_seq_len, in_seq_len]
+
+        Returns:
+            Computed output of size [batch_size, out_seq_len, dim]
+        '''
+
+        for masked_attn, norm, attn, ff in self.layers:
+            # Masked Attention
+            x = masked_attn(out_seq, out_seq, out_seq, attn_mask=shifted_output_mask)
+            x = self.dropout(x) + out_seq
+            x = norm(x)
+
+            # Regular Attention
+            y = attn(x, in_seq, in_seq, mask=padding_mask)
+            y = self.dropout(y) + x
+            y = norm(y)
+
+            # Feed forward
+            z = ff(y)
+            z = self.dropout(z) + y
+            z = norm(z)
+        
+
 class Model(nn.Module):
     def __init__(self, 
                 i_dim=(256, 512),
@@ -252,6 +304,6 @@ class Model(nn.Module):
         z = torch.cat((cls_to_batch, z), dim=1)
 
         encoded = self.transformer(z)[:, 0, :] #Take only the first index at each batch (cls_token)
-        logits = self.mlp_head(encoded)
+        # logits = self.mlp_head(encoded)
 
-        return logits
+        return encoded
