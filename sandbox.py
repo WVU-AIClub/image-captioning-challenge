@@ -12,7 +12,8 @@ model = Model(i_dim=224,
                 p_dim=16,
                 dim=768,
                 n_heads=4,
-                n_transformer_layers=12,
+                n_encoder_layers=6,
+                n_decoder_layers=6,
                 dropout=0,
                 device='cuda')
 # model = initialize_model(model, pretrained_vit, n=12)
@@ -20,12 +21,6 @@ model = Model(i_dim=224,
 noise = torch.rand([32, 3, 224, 224])
 
 out = model(noise)
-
-print(out)
-print(out.size())
-
-decoder = TransformerDecoder(dim=768, n_heads=4, n_layers=4, dropout=0)
-out = decoder(out, out, padding_mask=None, shifted_output_mask=None)
 
 print(out)
 print(out.size())

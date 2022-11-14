@@ -270,25 +270,27 @@ class Model(nn.Module):
                 p_dim=(64, 64),
                 dim=512,
                 n_heads=4,
-                n_transformer_layers=12,
+                n_encoder_layers=6,
+                n_decoder_layers=6,
                 dropout=0,
+                vocab_len=1000,
                 device='cpu'):
         
         super().__init__()
 
         W, H = i_dim, i_dim # temp solution
-        w, h = p_dim, i_dim
+        w, h = p_dim, p_dim
         nw, nh = W // w, H // h
         self.dim = dim
 
         proj_dim = 3 * w * h
-        self.embedding = nn.Sequential(
+        self.img_embedding = nn.Sequential(
             Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=h, pw=w),
             nn.Linear(proj_dim, dim)
         )
         # self.embedding = SPT(dim=dim, patch_size=w)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.pos_embedding = nn.Parameter(torch.randn(1, nh * nw, dim))
+        self.img_pos_embedding = nn.Parameter(torch.randn(1, nh * nw, dim))
         self.mlp_head = nn.Sequential(nn.Dropout(dropout),
                                     nn.Linear(dim, 384),
                                     nn.BatchNorm1d(384),
@@ -296,19 +298,25 @@ class Model(nn.Module):
                                     nn.Linear(384, 1),
                                     nn.Sigmoid())
 
-        self.transformer = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_transformer_layers, dropout=dropout)
+        self.encoder = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_encoder_layers, dropout=dropout)
+        self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
+        self.fc = nn.Linear(dim, vocab_len)
+        self.softmax = nn.Softmax()
 
-    def forward(self, x):
+    def forward(self, img, caption):
         #Expects: [b, c, h, w]
-        z = self.embedding(x)
-        z += self.pos_embedding
+        embedded_img = self.img_embedding(img)
+        embedded_img += self.img_pos_embedding
+
+        encoded_img = self.encoder(embedded_img)
+
+        # Preprare caption
+        # Embed caption
+        # Add position embedding
         
-        # b = z.size()[0]
-        # cls_to_batch = self.cls_token.expand([b, -1, -1])
-        # z = torch.cat((cls_to_batch, z), dim=1)
+        #                                       VVV - This will be the caption
+        decoded = self.decoder(encoded_img, encoded_img, padding_mask=None, shifted_output_mask=None)
 
-        # encoded = self.transformer(z)[:, 0, :] #Take only the first index at each batch (cls_token)
-        encoded = self.transformer(z)
-        # logits = self.mlp_head(encoded)
+        # Linear output
 
-        return encoded
+        return self.softmax(self.fc(decoded))
