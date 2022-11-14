@@ -169,19 +169,19 @@ class AttentionBlock(nn.Module):
         return x
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, dropout=0):
+    def __init__(self, dim, dropout=0, activation='relu'):
         super().__init__()
 
         self.norm2 = nn.LayerNorm(dim)
         self.fc1 = nn.Linear(dim, dim*4)
-        self.gelu = nn.GELU()
+        self.activation = nn.GELU() if activation == 'gelu' else nn.ReLU()
         self.fc2 = nn.Linear(dim*4, dim)
         self.drop = nn.Dropout(dropout)
 
     def forward(self, x):
         x = self.norm2(x)
         x = self.fc1(x)
-        x = self.gelu(x)
+        x = self.activation(x)
         x = self.fc2(x)
         x = self.drop(x)
         return x
@@ -210,16 +210,12 @@ class TransformerEncoder(nn.Module):
 
 class TransformerDecoder(nn.Module):
     def __init__(self, dim=512, n_heads=4, n_layers=4, dropout=0):
+        super().__init__()
         self.attn1 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
         self.attn2 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
         self.dropout = nn.Dropout(p=dropout)
         self.norm = nn.LayerNorm(dim)
-        self.ff = nn.Sequential([
-            nn.Linear(dim, dim*4),
-            nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Linear(dim*4, dim)
-        ])
+        self.ff = FeedForward(dim=dim, dropout=dropout)
 
         self.layers = nn.ModuleList([])
         for i in range(n_layers):
@@ -245,19 +241,27 @@ class TransformerDecoder(nn.Module):
 
         for masked_attn, norm, attn, ff in self.layers:
             # Masked Attention
-            x = masked_attn(out_seq, out_seq, out_seq, attn_mask=shifted_output_mask)
-            x = self.dropout(x) + out_seq
-            x = norm(x)
+            out_seq = norm(
+                self.dropout(
+                    masked_attn(out_seq, out_seq, out_seq, attn_mask=shifted_output_mask, need_weights=False)[0]
+                ) + out_seq
+            )
 
             # Regular Attention
-            y = attn(x, in_seq, in_seq, mask=padding_mask)
-            y = self.dropout(y) + x
-            y = norm(y)
+            out_seq = norm(
+                self.dropout(
+                    attn(out_seq, in_seq, in_seq, attn_mask=padding_mask, need_weights=False)[0]
+                ) + out_seq
+            )
 
             # Feed forward
-            z = ff(y)
-            z = self.dropout(z) + y
-            z = norm(z)
+            out_seq = norm(
+                self.dropout(
+                    ff(out_seq)
+                ) + out_seq
+            )
+
+        return out_seq
         
 
 class Model(nn.Module):
@@ -299,11 +303,12 @@ class Model(nn.Module):
         z = self.embedding(x)
         z += self.pos_embedding
         
-        b = z.size()[0]
-        cls_to_batch = self.cls_token.expand([b, -1, -1])
-        z = torch.cat((cls_to_batch, z), dim=1)
+        # b = z.size()[0]
+        # cls_to_batch = self.cls_token.expand([b, -1, -1])
+        # z = torch.cat((cls_to_batch, z), dim=1)
 
-        encoded = self.transformer(z)[:, 0, :] #Take only the first index at each batch (cls_token)
+        # encoded = self.transformer(z)[:, 0, :] #Take only the first index at each batch (cls_token)
+        encoded = self.transformer(z)
         # logits = self.mlp_head(encoded)
 
         return encoded
