@@ -19,8 +19,11 @@ model = Model(i_dim=224,
 # model = initialize_model(model, pretrained_vit, n=12)
 
 noise = torch.rand([32, 3, 224, 224])
+caption = torch.randint(high=1000, size=(32, 196))
 
-out = model(noise)
+out = model(noise, caption)
 
 print(out)
 print(out.size())
+
+

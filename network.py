@@ -6,7 +6,8 @@ from torch.nn.parameter import Parameter
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat
 import numpy as np
-
+import math
+from utils import shift_output_sequence, create_shifted_output_mask
 
 def init_to_zeros(m):
     '''
@@ -37,6 +38,37 @@ def initialize_model(model, pretrained, n=12):
         model.transformer.layers[i].mlp.load_state_dict(child.pwff.state_dict(), strict=False)
         model.transformer.layers[i].mlp.load_state_dict(child.state_dict(), strict=False)
     return model
+
+class PositionalEncodingComponent(nn.Module):
+    '''
+    Class to encode positional information to tokens.
+    For future, I want that this class to work even for sequences longer than 5000
+
+    From: https://github.com/akashe/Multimodal-action-recognition
+    '''
+
+    def __init__(self, hid_dim, dropout=0.2, max_len=5000):
+        super().__init__()
+
+        assert hid_dim % 2 == 0  # If not, it will result error in allocation to positional_encodings[:,1::2] later
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.positional_encodings = nn.Parameter(torch.zeros(1, max_len, hid_dim), requires_grad=False)
+        # Positional Embeddings : [1,max_len,hid_dim]
+
+        pos = torch.arange(0, max_len).unsqueeze(1)  # pos : [max_len,1]
+        div_term = torch.exp(-torch.arange(0, hid_dim, 2) * math.log(
+            10000.0) / hid_dim)  # Calculating value of 1/(10000^(2i/hid_dim)) in log space and then exponentiating it
+        # div_term: [hid_dim//2]
+
+        self.positional_encodings[:, :, 0::2] = torch.sin(pos * div_term)  # pos*div_term [max_len,hid_dim//2]
+        self.positional_encodings[:, :, 1::2] = torch.cos(pos * div_term)
+
+    def forward(self, x):
+        # TODO: update this for very long sequences
+        x = x + self.positional_encodings[:, :x.size(1)].detach()
+        return self.dropout(x)
 
 # To do: Fix this
 class SPT(nn.Module):
@@ -211,8 +243,8 @@ class TransformerEncoder(nn.Module):
 class TransformerDecoder(nn.Module):
     def __init__(self, dim=512, n_heads=4, n_layers=4, dropout=0):
         super().__init__()
-        self.attn1 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
-        self.attn2 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout)
+        self.attn1 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout, batch_first=True)
+        self.attn2 = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=dropout, batch_first=True)
         self.dropout = nn.Dropout(p=dropout)
         self.norm = nn.LayerNorm(dim)
         self.ff = FeedForward(dim=dim, dropout=dropout)
@@ -247,7 +279,7 @@ class TransformerDecoder(nn.Module):
                 ) + out_seq
             )
 
-            # Regular Attention
+            # Cross Attention
             out_seq = norm(
                 self.dropout(
                     attn(out_seq, in_seq, in_seq, attn_mask=padding_mask, need_weights=False)[0]
@@ -303,6 +335,9 @@ class Model(nn.Module):
         self.fc = nn.Linear(dim, vocab_len)
         self.softmax = nn.Softmax()
 
+        self.word_embedding = nn.Embedding(vocab_len, dim)
+        self.word_pos_embedding = PositionalEncodingComponent(dim, dropout, h*w) # Third param = embedding length
+
     def forward(self, img, caption):
         #Expects: [b, c, h, w]
         embedded_img = self.img_embedding(img)
@@ -310,12 +345,14 @@ class Model(nn.Module):
 
         encoded_img = self.encoder(embedded_img)
 
-        # Preprare caption
-        # Embed caption
-        # Add position embedding
-        
-        #                                       VVV - This will be the caption
-        decoded = self.decoder(encoded_img, encoded_img, padding_mask=None, shifted_output_mask=None)
+        # Prepare caption
+        caption = self.word_embedding(caption)
+        caption = self.word_pos_embedding(caption)
+
+        caption = shift_output_sequence(caption) # I have no idea why we do this
+        output_mask = create_shifted_output_mask(caption) # I also do not understand this
+
+        decoded = self.decoder(encoded_img, caption, padding_mask=None, shifted_output_mask=output_mask)
 
         # Linear output
 

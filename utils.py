@@ -56,7 +56,7 @@ def plot_multiple_lists(dir, title, x_label, y_label, lists, labels):
     plt.savefig(filename)
     plt.close()
 
-def create_shifted_output_mask(seq):
+def create_shifted_output_mask(seq, n_heads=4):
     """Creates a mask that prevents the decoder to attend future outputs.
     
     For each sample in the provided batch, the created mask is a square matrix that contains one row for every
@@ -86,11 +86,11 @@ def create_shifted_output_mask(seq):
     mask = 1 - seq.new(seq_len, seq_len).fill_(1).triu(diagonal=1).byte()
     
     # copy the mask for all samples in the batch
-    mask = mask.unsqueeze(0).expand(batch_size, -1, -1)
+    mask = mask.unsqueeze(0).expand(batch_size * n_heads, -1, -1)
     
     return mask
 
-def shift_output_sequence(seq, zero_range):
+def shift_output_sequence(seq, zero_range=1e-22):
     """Shifts the provided output sequence one position to the right.
     
     To shift the sequence, this function truncates the last element of and prepends a zero-entry to every sample of
