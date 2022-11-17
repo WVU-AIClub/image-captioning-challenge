@@ -4,6 +4,7 @@ from torch.nn import KLDivLoss
 import logging
 import time
 from utils import plot_list
+import os
 
 def train(model, dataloader, optim, device, config, vocab_len):
     logging.info('Beginning training loop...')
@@ -35,8 +36,11 @@ def train(model, dataloader, optim, device, config, vocab_len):
         end = time.time()
         total_time = end - start
         avg_loss = sum(epoch_loss) / len(epoch_loss)
-        logging.info(f'Avg Loss: {avg_loss}\nTime Elapsed: {total_time}s')
+        logging.info(f'Avg Loss: {avg_loss}\nTime Elapsed: {total_time}s\n')
 
         total_loss += epoch_loss
         plot_list(config['graph__path'], "Loss over time", x_label="Epoch",
                      y_label="KL_Div Loss", list=total_loss, label=None)
+
+        if epoch % 5 == 0:
+            torch.save(model.state_dict(), os.path.join(config['model_path'], config['model_name']))

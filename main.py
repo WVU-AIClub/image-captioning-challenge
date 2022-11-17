@@ -29,7 +29,6 @@ train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], sh
 
 
 # Initialize model
-pretrained_vit = ViT('B_32', pretrained=True)
 model = Model(i_dim=config['img_dim'],
                 p_dim=config['patch_dim'],
                 dim=config['hid_dim'],
@@ -37,7 +36,9 @@ model = Model(i_dim=config['img_dim'],
                 n_transformer_layers=config['n_transformer_layers'],
                 dropout=config['dropout'],
                 device=device)
-model = initialize_model(model, pretrained_vit, n=config['n_layer_init'])
+# pretrained_vit = ViT('B_32', pretrained=True)
+# model = initialize_model(model, pretrained_vit, n=config['n_layer_init'])
+model.to(device)
 
 num_params = count_parameters(model)
 logging.info(f'\nModel successfully loaded with {num_params} trainable parametrs\n')

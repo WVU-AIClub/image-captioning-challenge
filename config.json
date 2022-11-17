@@ -20,8 +20,8 @@
         "beta2": 0.999
     },
     
-
     "model_name": "model.pt",
+    "model_path": "models",
     "log_path": "logs",
     "graph_path": "graphs"
 }
