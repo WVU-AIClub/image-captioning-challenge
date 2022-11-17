@@ -12,6 +12,9 @@ from collections import Counter
 from data import BloomData
 from torch.utils.data import DataLoader
 import numpy as np
+from torch import nn
+import torch.nn.functional as F
+
 
 mode = 1
 vocab_len = 1000
@@ -36,13 +39,17 @@ model = Model(i_dim=224,
                 n_decoder_layers=3,
                 dropout=0,
                 vocab_len=vocab_len,
-                mode='eval',
+                mode='train',
                 device='cpu')
 
 out = model(noise, captions)
-print(out)
+onehot = F.one_hot(captions.to(torch.int64), vocab_len)
 
-print()
+KL = torch.nn.KLDivLoss(reduction='batchmean')
+loss = KL(out, onehot)
+print(loss)
 
-print(out[0])
+
+# print(out.size())
+# print(out[0])
 

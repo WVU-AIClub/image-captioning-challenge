@@ -336,17 +336,11 @@ class Model(nn.Module):
         # self.embedding = SPT(dim=dim, patch_size=w)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.img_pos_embedding = nn.Parameter(torch.randn(1, nh*nw, dim))
-        # self.mlp_head = nn.Sequential(nn.Dropout(dropout),
-        #                             nn.Linear(dim, 384),
-        #                             nn.BatchNorm1d(384),
-        #                             nn.ReLU(),
-        #                             nn.Linear(384, 1),
-        #                             nn.Sigmoid())
 
         self.encoder = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_encoder_layers, dropout=dropout)
         self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
         self.fc = nn.Linear(dim, vocab_len)
-        self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=2)
 
         self.word_embedding = nn.Embedding(vocab_len, dim)
         self.word_pos_embedding = PositionalEncodingComponent(dim, dropout, self.seq_len) # Third param = embedding length
@@ -356,6 +350,7 @@ class Model(nn.Module):
         # img    : [b, c, h, w]
         # caption: [b, seq_len]
 
+        # Encode images
         embedded_img = self.img_embedding(img)
         embedded_img += self.img_pos_embedding
         encoded_img = self.encoder(embedded_img)
@@ -374,8 +369,8 @@ class Model(nn.Module):
             # Linear projection of decoded caption to len_vocab
             logits = self.fc(decoded)
 
-            # Compute predictions
-            return self.softmax(logits)
+            # Compute predictions, take log to KL Divergence
+            return torch.log(self.softmax(logits))
 
         elif self.mode == 'eval':
             # Auto regressive generation
@@ -394,6 +389,5 @@ class Model(nn.Module):
 
             return caption
                 
-
     def generate_padding_mask(self, seq, pad_idx):
         return (seq == pad_idx).to(self.device)
