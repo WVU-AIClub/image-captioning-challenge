@@ -1,5 +1,9 @@
 {
-    "img_dim": 256,
+    "mode": "train",
+    "data_root": "D:/Big Data/Bloom",
+    "lang": "tha",
+
+    "img_dim": 224,
     "patch_dim": 16,
     "hid_dim": 768,
     "n_heads": 4,
@@ -18,5 +22,6 @@
     
 
     "model_name": "model.pt",
-    "log_path": "logs"
+    "log_path": "logs",
+    "graph_path": "graphs"
 }

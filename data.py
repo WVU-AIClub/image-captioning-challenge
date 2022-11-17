@@ -9,7 +9,7 @@ import torch
 
 
 class BloomData(Dataset):
-    def __init__(self, img_size, lang, seq_len=196):
+    def __init__(self, root, lang, img_size=224, seq_len=196):
         assert lang in ['tha', 'kir', 'hau'], f'Expected selected language to be "tha", "kir", or "hau". Got {lang}'
 
         # preprocess = T.Compose([
@@ -21,7 +21,8 @@ class BloomData(Dataset):
         self.dataset = load_dataset("sil-ai/bloom-captioning", self.lang, 
                        use_auth_token=True)
         train_captions = [self.dataset['train'][i]['caption'] for i in range(len(self.dataset['train']))]
-        self.vocab = self.get_vocab(strings=train_captions)
+        valid_captions = [self.dataset['validation'][i]['caption'] for i in range(len(self.dataset['validation']))]
+        self.word2ind, self.ind2word = self.get_vocab(strings=(train_captions + valid_captions))
         
         # Load images here
         
@@ -47,14 +48,14 @@ class BloomData(Dataset):
                 w = unicodedata.normalize('NFKD', word.text.lower()).strip()
                 if w in [' ', '', '\n']: continue
 
-                tokenized.append(self.vocab[w])
+                tokenized.append(self.word2ind[w])
         else:
             caption.replace('\n', ' ').split(' ')
             for word in caption:
                 w = unicodedata.normalize('NFKD', word.lower()).strip()
                 if w in [' ', '', '\n']: continue
 
-                tokenized.append(self.vocab[w])
+                tokenized.append(self.word2ind[w])
 
         # Append <eos> to caption
         tokenized.append(2)
@@ -63,8 +64,17 @@ class BloomData(Dataset):
         tokenized += [0]*(self.seq_len - len(tokenized))
         return torch.IntTensor(tokenized)
 
+    def untokenize(self, seq):
+        caption = []
+        for ind in seq:
+            word = self.ind2word[ind]
+            if word == '<eos>': break
+            caption.append(word)
+
+        return caption
+
     def get_vocab(self, strings):
-        vocab = {"<pad>": 0, "<sos>": 1, "<eos>": 2, "<unk>": 3}
+        word2ind = {"<pad>": 0, "<sos>": 1, "<eos>": 2, "<unk>": 3}
         if self.lang in ['tha', 'kir']:
             spacy_lang = 'th' if self.lang == 'tha' else 'ky'
             nlp = spacy.blank(spacy_lang)
@@ -88,7 +98,8 @@ class BloomData(Dataset):
                     if w in [' ', '', '\n']: continue
                     words.add(w)
 
-        vocab.update({token: i + len(vocab) for i, token in enumerate(words)})
+        word2ind.update({token: i + len(word2ind) for i, token in enumerate(words)})
 
         # To do: Reverse lookup
-        return vocab
+        ind2word = {index: caption for caption, index in word2ind.items()}
+        return word2ind, ind2word

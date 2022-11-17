@@ -2,10 +2,13 @@ import json
 import logging
 import torch
 from torch.optim import Adam, SGD
+from torch.utils.data import DataLoader
 from pytorch_pretrained_vit import ViT
 from utils import create_logfile, count_parameters
 from network import Model
 from network import initialize_model
+from data import BloomData
+from train_test import *
 
 with open('config.json', 'r') as f:
     config = json.load(f)
@@ -21,6 +24,9 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 logging.info(f'\tDevice: {device}')
 
 # Load Dataset and DataLoader(s) here
+train_dataset = BloomData(root=config['data_root'], lang=config['lang'], img_size=config['img_dim'], seq_len=196)
+train_dataloader = DataLoader(train_dataset, batch_size=config['batch_size'], shuffle=True)
+
 
 # Initialize model
 pretrained_vit = ViT('B_32', pretrained=True)
@@ -41,11 +47,12 @@ if config['optim']['type'] == 'Adam':
     optim = Adam(model.parameters(), lr=config['optim']['lr'], 
                  beta1=config['optim']['beta1'], beta2=config['optim']['beta2'])
 
-logging.info('Beginning training loop...')
-for epoch in range(config['epochs']):
-    logging.info(f'Epoch {epoch} -----------------')
-    # Run train step
-    print(epoch)
+if config['mode'] == 'train':
+    print('Running model in train mode')
+    train(model, train_dataloader, optim=optim, device=device, 
+            config=config, vocab_len=len(train_dataset.word2ind))
+elif config['mode'] == 'eval':
+    print("Running model in eval mode")
 
 
 

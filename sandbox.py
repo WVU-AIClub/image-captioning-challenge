@@ -16,12 +16,12 @@ from torch import nn
 import torch.nn.functional as F
 
 
-mode = 1
+mode = 0
 vocab_len = 1000
-noise = torch.rand([8, 3, 224, 224])
+noise = torch.rand([1, 3, 224, 224])
 
 if mode == 0:
-    captions = torch.randint(high=1000, size=(32, 196))
+    captions = torch.randint(high=1000, size=(1, 196))
 else:
     # iso639_3_letter_code = "hau"
     iso639_3_letter_code = "tha"
@@ -29,7 +29,9 @@ else:
     dataset = BloomData(img_size=128, lang=iso639_3_letter_code)
     dl = DataLoader(dataset, batch_size=8)
     captions = next(iter(dl))
-    vocab_len = len(dataset.vocab)
+    vocab_len = len(dataset.word2ind)
+    assert len(dataset.word2ind) == len(dataset.ind2word), 'Tables do not match!'
+
 
 model = Model(i_dim=224,
                 p_dim=16,
@@ -39,17 +41,23 @@ model = Model(i_dim=224,
                 n_decoder_layers=3,
                 dropout=0,
                 vocab_len=vocab_len,
-                mode='train',
+                mode='eval',
                 device='cpu')
 
 out = model(noise, captions)
-onehot = F.one_hot(captions.to(torch.int64), vocab_len)
+print(out)
 
-KL = torch.nn.KLDivLoss(reduction='batchmean')
-loss = KL(out, onehot)
-print(loss)
+# item = out[0]
+# cap = []
+# for i in range(len(item)):
+#     choice = torch.argmax(item[i])
+#     cap.append(choice.item())
 
+# cap = dataset.untokenize(cap)
+# print(cap)
+# onehot = F.one_hot(captions.to(torch.int64), vocab_len)
 
-# print(out.size())
-# print(out[0])
+# KL = torch.nn.KLDivLoss(reduction='batchmean')
+# loss = KL(out, onehot)
+# print(loss)
 

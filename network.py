@@ -8,6 +8,7 @@ from einops import rearrange, repeat
 import numpy as np
 import math
 from utils import shift_output_sequence, create_shifted_output_mask
+from tqdm import tqdm
 
 def init_to_zeros(m):
     '''
@@ -233,7 +234,6 @@ class TransformerEncoder(nn.Module):
             self.layers.append(temp)
 
     def forward(self, z):
-        # z = torch.flatten(z, start_dim=1, end_dim=2) 
         for attn, mlp in self.layers:
             z = attn(z) + z
             z = mlp(z) + z
@@ -298,9 +298,6 @@ class TransformerDecoder(nn.Module):
 
         return out_seq
 
-
-        
-
 class Model(nn.Module):
     def __init__(self, 
                 i_dim=(256, 512),
@@ -320,14 +317,17 @@ class Model(nn.Module):
         assert device in ['cuda', 'cpu'], f'device must be "cuda" or "cpu", got "{device}"'
         assert i_dim % p_dim == 0, 'Patch dim should evenly divide image dim'
 
+        self.dim = dim
+        self.device = device
+        self.mode = mode
+        self.seq_len = 196 # TODO: Either calulate this or add as param
+
+        # Image embedding components #
+
         W, H = i_dim, i_dim # temp solution
         w, h = p_dim, p_dim
         nw, nh = W // w, H // h
 
-        self.dim = dim
-        self.device = device
-        self.mode = mode
-        self.seq_len = h*w
         proj_dim = 3 * w * h
         self.img_embedding = nn.Sequential(
             Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=h, pw=w),
@@ -337,15 +337,20 @@ class Model(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.img_pos_embedding = nn.Parameter(torch.randn(1, nh*nw, dim))
 
-        self.encoder = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_encoder_layers, dropout=dropout)
-        self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
-        self.fc = nn.Linear(dim, vocab_len)
-        self.softmax = nn.Softmax(dim=2)
+        # Word embedding components #
 
         self.word_embedding = nn.Embedding(vocab_len, dim)
         self.word_pos_embedding = PositionalEncodingComponent(dim, dropout, self.seq_len) # Third param = embedding length
         self.scale = nn.Parameter(torch.sqrt(torch.FloatTensor([dim])), requires_grad=False)
 
+        # Transformer components #
+
+        self.encoder = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_encoder_layers, dropout=dropout)
+        self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
+        self.fc = nn.Linear(dim, vocab_len)
+        self.softmax = nn.Softmax(dim=2)
+
+    
     def forward(self, img, caption):
         # img    : [b, c, h, w]
         # caption: [b, seq_len]
@@ -369,25 +374,24 @@ class Model(nn.Module):
             # Linear projection of decoded caption to len_vocab
             logits = self.fc(decoded)
 
-            # Compute predictions, take log to KL Divergence
-            return torch.log(self.softmax(logits))
+            # Compute predictions
+            return self.softmax(logits)
 
         elif self.mode == 'eval':
             # Auto regressive generation
             # Expects caption to be Zeros tensor of size [batch_size, seq_len]
             # Note this is horribly inefficient, but I simply do not have time to bother improving it
-            for i in range(self.seq_len-1):
-                print(i)
+            for i in tqdm(range(self.seq_len), 'Generating caption, this could take a while'):
                 embedded_caption = self.word_embedding(caption) * self.scale
                 embedded_caption = self.word_pos_embedding(embedded_caption)
                 embedded_caption = shift_output_sequence(embedded_caption) # Still no idea
 
                 decoded = self.decoder(encoded_img, embedded_caption, shifted_output_mask=None, key_padding_mask=None)
-                preds = self.softmax(self.fc(decoded))
-                preds = torch.argmax(preds, axis=2)   # Get prediction for every row as int
-                caption[:, i] = preds[:, i]
+                preds = self.softmax(self.fc(decoded))  # Get probs
+                preds = torch.argmax(preds, axis=2)     # Get prediction for every row as int
+                caption[:, i] = preds[:, i]             # Add to next index in caption and feed back to decoder
 
-            return caption
+            return caption 
                 
     def generate_padding_mask(self, seq, pad_idx):
         return (seq == pad_idx).to(self.device)

@@ -46,7 +46,7 @@ def plot_multiple_lists(dir, title, x_label, y_label, lists, labels):
     
     for list_, label in zip(lists, labels):
         plt.plot(list_, label=label)
-        
+    
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.legend()
