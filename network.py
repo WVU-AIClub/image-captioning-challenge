@@ -208,14 +208,14 @@ class FeedForward(nn.Module):
         self.fc1 = nn.Linear(dim, dim*4)
         self.activation = nn.GELU() if activation == 'gelu' else nn.ReLU()
         self.fc2 = nn.Linear(dim*4, dim)
-        self.drop = nn.Dropout(dropout)
+        self.conv1 = nn.Conv1d(dim, dim, 1)
+        self.conv2 = nn.Conv1d(dim, dim, 1)
 
     def forward(self, x):
-        x = self.norm2(x)
+        # x = self.norm2(x)
         x = self.fc1(x)
         x = self.activation(x)
         x = self.fc2(x)
-        x = self.drop(x)
         return x
 
 class TransformerEncoder(nn.Module):
@@ -258,7 +258,7 @@ class TransformerDecoder(nn.Module):
             temp.add_module('ff', self.ff)
             self.layers.append(temp)
 
-    def forward(self, in_seq, out_seq, padding_mask, shifted_output_mask):
+    def forward(self, in_seq, out_seq, key_padding_mask, shifted_output_mask):
         '''
         Args:
             in_seq: Input sequence of size [batch_size, in_seq_len, dim]
@@ -271,20 +271,23 @@ class TransformerDecoder(nn.Module):
             Computed output of size [batch_size, out_seq_len, dim]
         '''
 
-        for masked_attn, norm, attn, ff in self.layers:
+        for masked_attn, norm, cross_attn, ff in self.layers:
             # Masked Attention
             out_seq = norm(
                 self.dropout(
-                    masked_attn(out_seq, out_seq, out_seq, attn_mask=shifted_output_mask, need_weights=False)[0]
+                    masked_attn(out_seq, out_seq, out_seq, attn_mask=shifted_output_mask, 
+                                need_weights=False, key_padding_mask=key_padding_mask)[0]
                 ) + out_seq
             )
+            out_seq = out_seq.masked_fill(torch.isnan(out_seq), 0)
 
             # Cross Attention
             out_seq = norm(
                 self.dropout(
-                    attn(out_seq, in_seq, in_seq, attn_mask=padding_mask, need_weights=False)[0]
+                    cross_attn(out_seq, in_seq, in_seq, attn_mask=None, need_weights=False)[0]
                 ) + out_seq
             )
+            out_seq = out_seq.masked_fill(torch.isnan(out_seq), 0)
 
             # Feed forward
             out_seq = norm(
@@ -294,6 +297,8 @@ class TransformerDecoder(nn.Module):
             )
 
         return out_seq
+
+
         
 
 class Model(nn.Module):
@@ -306,15 +311,23 @@ class Model(nn.Module):
                 n_decoder_layers=6,
                 dropout=0,
                 vocab_len=1000,
+                mode='train',
                 device='cpu'):
         
         super().__init__()
 
+        assert mode in ['train', 'eval'], f'mode must be "train" or "eval", got "{mode}"'
+        assert device in ['cuda', 'cpu'], f'device must be "cuda" or "cpu", got "{device}"'
+        assert i_dim % p_dim == 0, 'Patch dim should evenly divide image dim'
+
         W, H = i_dim, i_dim # temp solution
         w, h = p_dim, p_dim
         nw, nh = W // w, H // h
-        self.dim = dim
 
+        self.dim = dim
+        self.device = device
+        self.mode = mode
+        self.seq_len = h*w
         proj_dim = 3 * w * h
         self.img_embedding = nn.Sequential(
             Rearrange('b c (h ph) (w pw) -> b (h w) (ph pw c)', ph=h, pw=w),
@@ -322,13 +335,13 @@ class Model(nn.Module):
         )
         # self.embedding = SPT(dim=dim, patch_size=w)
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.img_pos_embedding = nn.Parameter(torch.randn(1, nh * nw, dim))
-        self.mlp_head = nn.Sequential(nn.Dropout(dropout),
-                                    nn.Linear(dim, 384),
-                                    nn.BatchNorm1d(384),
-                                    nn.ReLU(),
-                                    nn.Linear(384, 1),
-                                    nn.Sigmoid())
+        self.img_pos_embedding = nn.Parameter(torch.randn(1, nh*nw, dim))
+        # self.mlp_head = nn.Sequential(nn.Dropout(dropout),
+        #                             nn.Linear(dim, 384),
+        #                             nn.BatchNorm1d(384),
+        #                             nn.ReLU(),
+        #                             nn.Linear(384, 1),
+        #                             nn.Sigmoid())
 
         self.encoder = TransformerEncoder(dim=dim, n_heads=n_heads, n_layers=n_encoder_layers, dropout=dropout)
         self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
@@ -336,24 +349,51 @@ class Model(nn.Module):
         self.softmax = nn.Softmax()
 
         self.word_embedding = nn.Embedding(vocab_len, dim)
-        self.word_pos_embedding = PositionalEncodingComponent(dim, dropout, h*w) # Third param = embedding length
+        self.word_pos_embedding = PositionalEncodingComponent(dim, dropout, self.seq_len) # Third param = embedding length
+        self.scale = nn.Parameter(torch.sqrt(torch.FloatTensor([dim])), requires_grad=False)
 
     def forward(self, img, caption):
-        #Expects: [b, c, h, w]
+        # img    : [b, c, h, w]
+        # caption: [b, seq_len]
+
         embedded_img = self.img_embedding(img)
         embedded_img += self.img_pos_embedding
-
         encoded_img = self.encoder(embedded_img)
 
-        # Prepare caption
-        caption = self.word_embedding(caption)
-        caption = self.word_pos_embedding(caption)
+        if self.mode == 'train':
+            # Prepare caption and masks
+            key_padding_mask = self.generate_padding_mask(caption, 0) # Tells attn which values are pads (to be ignored)
+            caption = self.word_embedding(caption) * self.scale       # Embed int tokens to vectors of len dim
+            caption = self.word_pos_embedding(caption)                # Add positional embedding
+            caption = shift_output_sequence(caption)                  # I have no idea why we do this
+            output_mask = create_shifted_output_mask(caption)         # Create lower triangle mask to prevent forward attn
 
-        caption = shift_output_sequence(caption) # I have no idea why we do this
-        output_mask = create_shifted_output_mask(caption) # I also do not understand this
+            # Decode Image and Caption
+            decoded = self.decoder(encoded_img, caption, shifted_output_mask=output_mask, key_padding_mask=key_padding_mask)
 
-        decoded = self.decoder(encoded_img, caption, padding_mask=None, shifted_output_mask=output_mask)
+            # Linear projection of decoded caption to len_vocab
+            logits = self.fc(decoded)
 
-        # Linear output
+            # Compute predictions
+            return self.softmax(logits)
 
-        return self.softmax(self.fc(decoded))
+        elif self.mode == 'eval':
+            # Auto regressive generation
+            # Expects caption to be Zeros tensor of size [batch_size, seq_len]
+            # Note this is horribly inefficient, but I simply do not have time to bother improving it
+            for i in range(self.seq_len-1):
+                print(i)
+                embedded_caption = self.word_embedding(caption) * self.scale
+                embedded_caption = self.word_pos_embedding(embedded_caption)
+                embedded_caption = shift_output_sequence(embedded_caption) # Still no idea
+
+                decoded = self.decoder(encoded_img, embedded_caption, shifted_output_mask=None, key_padding_mask=None)
+                preds = self.softmax(self.fc(decoded))
+                preds = torch.argmax(preds, axis=2)   # Get prediction for every row as int
+                caption[:, i] = preds[:, i]
+
+            return caption
+                
+
+    def generate_padding_mask(self, seq, pad_idx):
+        return (seq == pad_idx).to(self.device)

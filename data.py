@@ -5,10 +5,11 @@ import spacy
 from collections import Counter
 import re
 import unicodedata
+import torch
 
 
 class BloomData(Dataset):
-    def __init__(self, img_size, lang):
+    def __init__(self, img_size, lang, seq_len=196):
         assert lang in ['tha', 'kir', 'hau'], f'Expected selected language to be "tha", "kir", or "hau". Got {lang}'
 
         # preprocess = T.Compose([
@@ -16,19 +17,22 @@ class BloomData(Dataset):
         #     T.Resize(img_size)
         # ])
         self.lang = lang
+        self.seq_len = seq_len
         self.dataset = load_dataset("sil-ai/bloom-captioning", self.lang, 
-                       use_auth_token=True, download_mode='force_redownload')
+                       use_auth_token=True)
         train_captions = [self.dataset['train'][i]['caption'] for i in range(len(self.dataset['train']))]
         self.vocab = self.get_vocab(strings=train_captions)
         
         # Load images here
         
     def __len__(self):
-        return
+        return len(self.dataset['train'])
 
     def __getitem__(self, idx):
+        caption = self.tokenize(self.dataset['train'][idx]['caption'])
 
-        return
+        # Return img, caption
+        return caption
 
     def load_images(self):
         return
@@ -51,7 +55,13 @@ class BloomData(Dataset):
                 if w in [' ', '', '\n']: continue
 
                 tokenized.append(self.vocab[w])
-        return tokenized
+
+        # Append <eos> to caption
+        tokenized.append(2)
+
+        # Pad to seq_len
+        tokenized += [0]*(self.seq_len - len(tokenized))
+        return torch.IntTensor(tokenized)
 
     def get_vocab(self, strings):
         vocab = {"<pad>": 0, "<sos>": 1, "<eos>": 2, "<unk>": 3}
