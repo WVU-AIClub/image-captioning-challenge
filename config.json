@@ -2,20 +2,22 @@
     "mode": "train",
     "data_root": "D:/Big Data/Bloom",
     "lang": "tha",
+    "priority": "speed",
 
     "img_dim": 224,
     "patch_dim": 16,
-    "hid_dim": 768,
-    "n_heads": 4,
-    "n_transformer_layers": 12,
+    "hid_dim": 512,
+    "n_heads": 8,
+    "n_encoder_layers": 3,
+    "n_decoder_layers": 3,
     "dropout": 0,
     "n_layer_init": 12,
 
-    "batch_size": 32,
+    "batch_size": 16,
     "epochs": 10,
     "optim": {
         "type": "adam",
-        "lr": 0.0001,
+        "lr": 1e-6,
         "beta1": 0.9,
         "beta2": 0.999
     },

@@ -321,6 +321,7 @@ class Model(nn.Module):
         self.device = device
         self.mode = mode
         self.seq_len = 196 # TODO: Either calulate this or add as param
+        self.n_heads = n_heads
 
         # Image embedding components #
 
@@ -349,6 +350,7 @@ class Model(nn.Module):
         self.decoder = TransformerDecoder(dim=dim, n_heads=n_heads, n_layers=n_decoder_layers, dropout=dropout)
         self.fc = nn.Linear(dim, vocab_len)
         self.softmax = nn.Softmax(dim=2)
+        self.LogSoftmax = nn.LogSoftmax(dim=2)
 
     
     def forward(self, img, caption):
@@ -366,7 +368,7 @@ class Model(nn.Module):
             caption = self.word_embedding(caption) * self.scale       # Embed int tokens to vectors of len dim
             caption = self.word_pos_embedding(caption)                # Add positional embedding
             caption = shift_output_sequence(caption)                  # I have no idea why we do this
-            output_mask = create_shifted_output_mask(caption)         # Create lower triangle mask to prevent forward attn
+            output_mask = create_shifted_output_mask(caption, n_heads=self.n_heads) # Create lower triangle mask to prevent forward attn
 
             # Decode Image and Caption
             decoded = self.decoder(encoded_img, caption, shifted_output_mask=output_mask, key_padding_mask=key_padding_mask)
@@ -375,7 +377,7 @@ class Model(nn.Module):
             logits = self.fc(decoded)
 
             # Compute predictions
-            return self.softmax(logits)
+            return self.LogSoftmax(logits)
 
         elif self.mode == 'eval':
             # Auto regressive generation

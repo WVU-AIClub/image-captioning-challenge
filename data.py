@@ -8,52 +8,59 @@ import unicodedata
 import torch
 from PIL import Image
 import os
+from tqdm import tqdm
 
 class BloomData(Dataset):
     def __init__(self, root, lang, img_size=224, seq_len=196, priority='speed', split='train'):
         assert lang in ['tha', 'kir', 'hau'], f'Expected selected language to be "tha", "kir", or "hau". Got {lang}'
 
+        self.root = root
+        self.lang = lang
+        self.split = split
         self.priority = priority
+        self.seq_len = seq_len
 
         # Label Loading
-        self.lang = lang
-        self.seq_len = seq_len
         self.dataset = load_dataset("sil-ai/bloom-captioning", self.lang, 
                        use_auth_token=True)
         train_captions = [self.dataset['train'][i]['caption'] for i in range(len(self.dataset['train']))]
         valid_captions = [self.dataset['validation'][i]['caption'] for i in range(len(self.dataset['validation']))]
         self.word2ind, self.ind2word = self.get_vocab(strings=(train_captions + valid_captions))
+        self.vocab_len = len(self.word2ind)
         
         # Image loading
-        preprocess = T.Compose([
-            T.Resize(img_size),
+        self.preprocess = T.Compose([
+            T.Resize((img_size, img_size)),
             T.ToTensor()
         ])
 
         self.data = {}
-        for item in self.dataset[split]:
-            filename = f'{item['image_id']}.jpg'
+        for item in tqdm(self.dataset[split], f'Loading data from {lang} -> {split}'):
+            _id = item['image_id']
+            filename = f'{_id}.jpg'
             img = os.path.join(root, lang, split, filename)
 
             if self.priority == 'speed':
-                img = Image.open(os.path.join(root, lang, split, filename))
-                img = preprocess(img)
-            self.data[item['image_id']] = {
+                img = Image.open(os.path.join(root, lang, split, filename)).convert('RGB')
+                img = self.preprocess(img)
+            self.data[_id] = {
                 'img': img,
                 'caption': item['caption']
             }
 
 
     def __len__(self):
-        return len(self.dataset['train'])
+        return len(self.data)
 
     def __getitem__(self, idx):
-        img = self.data[idx]['img']
+        _id = list(self.data)[idx]
+        img = self.data[_id]['img']
         if self.priority == 'space':
-            img = Image.open(os.path.join(root, lang, split, filename))
-            img = preprocess(img)
+            img = Image.open(os.path.join(self.root, self.lang, self.split, img)).convert('RGB')
+            img = self.preprocess(img)
+        img = img[:3] # Take first 3 channels from img (handles RGBA images)
 
-        caption = self.tokenize(self.data[idx]['caption'])
+        caption = self.tokenize(self.data[_id]['caption'])
 
         # Return img, caption
         return img, caption
