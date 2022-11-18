@@ -6,16 +6,16 @@ from collections import Counter
 import re
 import unicodedata
 import torch
-
+from PIL import Image
+import os
 
 class BloomData(Dataset):
-    def __init__(self, root, lang, img_size=224, seq_len=196):
+    def __init__(self, root, lang, img_size=224, seq_len=196, priority='speed', split='train'):
         assert lang in ['tha', 'kir', 'hau'], f'Expected selected language to be "tha", "kir", or "hau". Got {lang}'
 
-        # preprocess = T.Compose([
-        #     T.CenterCrop(),
-        #     T.Resize(img_size)
-        # ])
+        self.priority = priority
+
+        # Label Loading
         self.lang = lang
         self.seq_len = seq_len
         self.dataset = load_dataset("sil-ai/bloom-captioning", self.lang, 
@@ -24,16 +24,39 @@ class BloomData(Dataset):
         valid_captions = [self.dataset['validation'][i]['caption'] for i in range(len(self.dataset['validation']))]
         self.word2ind, self.ind2word = self.get_vocab(strings=(train_captions + valid_captions))
         
-        # Load images here
-        
+        # Image loading
+        preprocess = T.Compose([
+            T.Resize(img_size),
+            T.ToTensor()
+        ])
+
+        self.data = {}
+        for item in self.dataset[split]:
+            filename = f'{item['image_id']}.jpg'
+            img = os.path.join(root, lang, split, filename)
+
+            if self.priority == 'speed':
+                img = Image.open(os.path.join(root, lang, split, filename))
+                img = preprocess(img)
+            self.data[item['image_id']] = {
+                'img': img,
+                'caption': item['caption']
+            }
+
+
     def __len__(self):
         return len(self.dataset['train'])
 
     def __getitem__(self, idx):
-        caption = self.tokenize(self.dataset['train'][idx]['caption'])
+        img = self.data[idx]['img']
+        if self.priority == 'space':
+            img = Image.open(os.path.join(root, lang, split, filename))
+            img = preprocess(img)
+
+        caption = self.tokenize(self.data[idx]['caption'])
 
         # Return img, caption
-        return caption
+        return img, caption
 
     def load_images(self):
         return
