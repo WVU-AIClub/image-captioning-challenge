@@ -49,7 +49,7 @@ def plot_multiple_lists(dir, title, x_label, y_label, lists, labels):
     
     plt.xlabel(x_label)
     plt.ylabel(y_label)
-    plt.legend()
+    plt.legend()p
 
     filename = os.path.join(dir, f'{title}.png')
     
